@@ -218,16 +218,46 @@ Output of `make test` against `http://192.168.1.198:8000` (state: "Checkout has
 been failing for every customer for the last hour. Orders are blocked and support
 is getting refund demands."):
 
-| Question type | Request | Answer | Latency |
+| Question type | Prompt | Answer | Latency |
 |---|---|---|---|
 | `noul` — "Is a service down?" | 163 tokens | `noul: 0.9425` | 0.274s |
 | `choice` — "Which team should handle the message?" | 180 tokens | `technical` (confidence 0.9804; billing 0.0134, sales 0.0062) | 0.264s |
 | `score` — "How soon does this need a response?" (Can wait / This week / Today) | 167 tokens | `1.9583` ≈ Today (confidence 0.9752; 0.0170 / 0.0078 / 0.9752) | 0.273s |
 
+Each request is a separate process-level round trip, but inside the server every one of
+them is a single prefill: `ttfb` is within ~0.2 ms of `total` in all three cases, so
+there is no decoding phase to wait for. The differences in latency are just prompt
+length (163 / 180 / 167 tokens) and GPU scheduling noise.
+
+In all three cases the state is identical, so the difference in prompt length is only
+the rendered schema: the number of options and the length of their descriptions.
+
 Raw responses:
 
 <details>
 <summary><code>noul</code></summary>
+
+**What executes.** `encode_record()` renders the schema as one field with two options
+(`question_options()` injects `true`/`false` descriptions automatically for `noul`):
+
+```text
+FIELD 1
+ID: outage
+TYPE: noul
+INSTRUCTION: Is a service down?
+ALLOWED OPTIONS:
+OPTION 1: {"option_id":"true","description":"The proposition is true or the answer is yes."}
+OPTION 2: {"option_id":"false","description":"The proposition is false or the answer is no."}
+END FIELD
+```
+
+Prefixed with `STATE:`, the system message, and the assistant prefill, this is 163
+tokens. One forward pass gives two option logits, `softmax` turns them into
+`{true: 0.9425, false: 0.0575}`, and `systemone_answer()` passes `p(true)` through —
+this is the only type with no argmax and no expectation, and the only one that discards
+half the distribution: `false` is implied as `1 − 0.9425 = 0.0575` but never returned.
+
+Read it as: "with ~94% probability, a service is down".
 
 ```json
 {
@@ -243,6 +273,22 @@ Raw responses:
 
 <details>
 <summary><code>choice</code></summary>
+
+**What executes.** `question_options()` sorts the criteria keys, so the three options
+are rendered `billing`, `sales`, `technical`. Prefix, state, and schema come to 180
+tokens. The head emits three logits; `softmax` gives
+`{billing: 0.0134, sales: 0.0062, technical: 0.9804}`. Then, in Python:
+
+```python
+choice = max(options, key=probabilities.__getitem__)   # "technical"
+confidence = probabilities[choice]                     # 0.9804
+```
+
+So `choice` and `confidence` are both derived from the same distribution — `confidence`
+is just the winning probability, not a separate model output. The probabilities sum to
+1.0 (`0.0134 + 0.0062 + 0.9804`) and are rounded to 4 decimals for display.
+
+Read it as: "route this to the technical team, ~98% sure; billing is a ~1% long shot".
 
 ```json
 {
@@ -263,6 +309,28 @@ Raw responses:
 
 <details>
 <summary><code>score</code></summary>
+
+**What executes.** The three criteria become indexed levels `0`, `1`, `2`; the schema
+renders them in order, giving 167 tokens. The head emits three logits and `softmax`
+gives `{0: 0.017, 1: 0.0078, 2: 0.9752}`. The answer is then computed in Python:
+
+```python
+score = sum(index * probabilities[level] for index, level in enumerate(levels))
+#      0*0.0170 + 1*0.0078 + 2*0.9752 = 1.9582 from the rounded values above;
+#      the server computes it at full precision and reports 1.9583
+confidence = max(probabilities[level] for level in levels)   # 0.9752
+legend = dict(zip(levels, question["criteria"]))  # {"0": "Can wait", ...}
+```
+
+This is the clearest illustration that the headline number is post-processed: `1.9583`
+is a weighted average, not something the model chose. It is not exactly `2.0` because
+the small mass on `0` and `1` pulls the mean down. The `legend` is copied verbatim from
+the request's `criteria`, which is why the response can be read without the original
+request.
+
+Read it as: "today, essentially — ~98% of the mass on the last level" — but prefer
+`confidence` over `score` when you need a hard cut, since a flat distribution across
+`0` and `2` yields `1.0` with low confidence.
 
 ```json
 {
