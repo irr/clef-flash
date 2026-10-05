@@ -8,6 +8,43 @@ decision model that turns a state and a schema of typed questions (`noul`, `choi
 `run.sh` sets up a `uv` virtualenv, downloads the ~19 GB weights, and serves the
 Jev-compatible `POST /v1/decisions` API.
 
+## Question types
+
+A request's `questions` object maps question IDs to one of three typed questions.
+All are answered in a single forward pass.
+
+| Type | Purpose | `criteria` | Answer |
+|---|---|---|---|
+| `noul` | Yes/no question | not needed | `noul`: probability in \[0, 1\] that the answer is yes (1.0 = yes, 0.0 = no) |
+| `choice` | Pick one option from a finite set | object mapping option ID to its description | `choice` (option ID), `confidence`, and `probabilities` for every option |
+| `score` | Rate on an ordered 0..N-1 scale | array of labels, index 0 = lowest | `score` (continuous value on the scale), `confidence`, `legend` (index to label), and `probabilities` per index |
+
+All types require `instructions` (the question in natural language). Multiple
+questions of any mix of types can be combined in one request; each is answered
+independently in the same forward pass:
+
+```json
+{
+  "is_down": {
+    "type": "noul",
+    "instructions": "Is a service down?"
+  },
+  "department": {
+    "type": "choice",
+    "instructions": "Which team should handle the message?",
+    "criteria": {
+      "billing": "Payments, invoices, or refunds",
+      "technical": "Bugs, outages, or blocked orders"
+    }
+  },
+  "urgency": {
+    "type": "score",
+    "instructions": "How soon does this need a response?",
+    "criteria": ["Can wait", "This week", "Today"]
+  }
+}
+```
+
 ## Quick start
 
 ```sh
