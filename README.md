@@ -69,6 +69,76 @@ curl -s http://127.0.0.1:8000/v1/decisions \
 Responses contain `answers` keyed by question ID with probabilities for every
 allowed option, plus `usage`. Optional `images` and `videos` may be added to requests.
 
+## Example output
+
+Output of `make test` against `http://192.168.1.198:8000` (state: "Checkout has
+been failing for every customer for the last hour. Orders are blocked and support
+is getting refund demands."):
+
+| Question type | Request | Answer | Latency |
+|---|---|---|---|
+| `noul` — "Is a service down?" | 163 tokens | `noul: 0.9425` | 0.274s |
+| `choice` — "Which team should handle the message?" | 180 tokens | `technical` (confidence 0.9804; billing 0.0134, sales 0.0062) | 0.264s |
+| `score` — "How soon does this need a response?" (Can wait / This week / Today) | 167 tokens | `1.9583` ≈ Today (confidence 0.9752; 0.0170 / 0.0078 / 0.9752) | 0.273s |
+
+Raw responses:
+
+<details>
+<summary><code>noul</code></summary>
+
+```json
+{
+  "model": "clef-flash",
+  "answers": {
+    "outage": { "type": "noul", "noul": 0.9425 }
+  },
+  "usage": { "input_tokens": 163, "output_tokens": 0 }
+}
+```
+
+</details>
+
+<details>
+<summary><code>choice</code></summary>
+
+```json
+{
+  "model": "clef-flash",
+  "answers": {
+    "department": {
+      "type": "choice",
+      "choice": "technical",
+      "confidence": 0.9804,
+      "probabilities": { "billing": 0.0134, "technical": 0.9804, "sales": 0.0062 }
+    }
+  },
+  "usage": { "input_tokens": 180, "output_tokens": 0 }
+}
+```
+
+</details>
+
+<details>
+<summary><code>score</code></summary>
+
+```json
+{
+  "model": "clef-flash",
+  "answers": {
+    "urgency": {
+      "type": "score",
+      "score": 1.9583,
+      "confidence": 0.9752,
+      "legend": { "0": "Can wait", "1": "This week", "2": "Today" },
+      "probabilities": { "0": 0.017, "1": 0.0078, "2": 0.9752 }
+    }
+  },
+  "usage": { "input_tokens": 167, "output_tokens": 0 }
+}
+```
+
+</details>
+
 ## ROCm (Strix Halo / gfx1151)
 
 On Radeon 8060S-class GPUs (Ryzen AI Max, GMKtec EVO-X2), the pytorch.org ROCm
