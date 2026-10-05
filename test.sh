@@ -6,9 +6,9 @@
 #   BASE_URL=http://127.0.0.1:8000 ./test.sh
 #   STATE="Database replica lag is growing." BASE_URL=... ./test.sh
 #
-# Pretty-prints every request and response. Uses jq when available, falls back to
-# python3 -m json.tool, and finally to the raw text. Colours are emitted only when
-# stdout is a terminal, so redirected output stays clean.
+# Pretty-prints every request and response, coloured on a terminal. JSON is rendered
+# with jq when available, otherwise python3, otherwise raw. Set NO_COLOR=1 to disable
+# colour and FORCE_COLOR=1 to keep it when piping (useful for a screenshot or a pager).
 
 set -euo pipefail
 
@@ -18,12 +18,20 @@ TIMEOUT="${TIMEOUT:-120}"
 WIDTH="${WIDTH:-70}"
 
 # ---------------------------------------------------------------- colours ----
-if [[ -t 1 ]]; then
+# Colour when attached to a terminal (or when FORCE_COLOR is set); NO_COLOR wins.
+COLOR=0
+if [[ -n "${FORCE_COLOR:-}" ]] || { [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; }; then
+  COLOR=1
+fi
+
+if (( COLOR )); then
   BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
   BLUE=$'\033[34m'; GREEN=$'\033[32m'
   YELLOW=$'\033[33m'; RED=$'\033[31m'
+  JQ_MODE=(-C)
 else
   BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""; RED=""
+  JQ_MODE=(-M)
 fi
 
 rule() { printf '%s\n' "${DIM}$(printf '─%.0s' $(seq 1 "$WIDTH"))${RESET}"; }
@@ -35,13 +43,57 @@ label() { printf '%s\n' "${YELLOW}${BOLD}· ${1}${RESET}"; }
 indent() { sed 's/^/    /'; }
 
 # ------------------------------------------------------------ json pretty ----
-# Prints JSON indented, or the input unchanged when nothing can parse it.
+# Colourised JSON rendering, used when jq is unavailable. No single quotes in here
+# (the whole script is passed via single-quoted python3 -c).
+PY_PRETTY='
+import json, sys
+
+COLOR = sys.argv[1] == "1"
+KEY = "\033[34;1m"
+STR = "\033[32m"
+NUM = "\033[36m"
+LIT = "\033[35m"
+PUNCT = "\033[2m"
+RESET = "\033[0m"
+
+
+def paint(code, text):
+    return code + text + RESET if COLOR else text
+
+
+def dump(obj, level=0):
+    pad = "  " * level
+    inner = "  " * (level + 1)
+    if isinstance(obj, dict):
+        if not obj:
+            return paint(PUNCT, "{}")
+        parts = [inner + paint(KEY, json.dumps(k)) + paint(PUNCT, ": ") + dump(v, level + 1) for k, v in obj.items()]
+        return paint(PUNCT, "{") + "\n" + paint(PUNCT, ",\n").join(parts) + "\n" + pad + paint(PUNCT, "}")
+    if isinstance(obj, list):
+        if not obj:
+            return paint(PUNCT, "[]")
+        parts = [inner + dump(v, level + 1) for v in obj]
+        return paint(PUNCT, "[") + "\n" + paint(PUNCT, ",\n").join(parts) + "\n" + pad + paint(PUNCT, "]")
+    if isinstance(obj, bool):
+        return paint(LIT, "true" if obj else "false")
+    if obj is None:
+        return paint(LIT, "null")
+    if isinstance(obj, str):
+        return paint(STR, json.dumps(obj))
+    return paint(NUM, json.dumps(obj))
+
+
+print(dump(json.load(sys.stdin)))
+'
+
+# Prints JSON indented and (when enabled) coloured, or the input unchanged when
+# nothing can parse it. jq is forced to -C/-M because its stdout is a pipe here.
 pretty() {
   local input="$1"
-  if command -v jq >/dev/null 2>&1 && printf '%s\n' "$input" | jq . 2>/dev/null; then
+  if command -v jq >/dev/null 2>&1 && printf '%s\n' "$input" | jq "${JQ_MODE[@]}" . 2>/dev/null; then
     return 0
   fi
-  if command -v python3 >/dev/null 2>&1 && printf '%s\n' "$input" | python3 -m json.tool 2>/dev/null; then
+  if command -v python3 >/dev/null 2>&1 && printf '%s' "$input" | python3 -c "$PY_PRETTY" "$COLOR" 2>/dev/null; then
     return 0
   fi
   printf '%s\n' "$input"

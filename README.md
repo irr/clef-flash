@@ -309,10 +309,10 @@ BASE_URL=http://192.168.1.198:8000 ./test.sh  # or any remote server
 ```
 
 `test.sh` posts one request per type with the same `STATE`, prints each request and
-response pretty-printed, and finishes with a summary table. JSON is formatted with `jq`
-when available, otherwise `python3 -m json.tool`, otherwise raw. The `Makefile` target
-only points at `127.0.0.1`; for a remote host, call `test.sh` directly and pass
-`BASE_URL`, as above.
+response pretty-printed (and colourised on a terminal), and finishes with a summary
+table. JSON is formatted with `jq` when available, otherwise a bundled `python3`
+colouriser, otherwise raw. The `Makefile` target only points at `127.0.0.1`; for a
+remote host, call `test.sh` directly and pass `BASE_URL`, as above.
 
 Note: `ttfb` (time to first byte) is within a fraction of a millisecond of `total` in
 every response — there is no streaming and no decode phase, so the first byte *is* the
@@ -536,9 +536,10 @@ request, the response, and a `latency` line; the run ends with a summary table. 
 and `ttfb` are within a fraction of a millisecond of each other, because the whole
 answer arrives in the first byte — there is no decode phase.
 
-Colours are omitted here because the run was piped; on a terminal the headings and
-labels are colourised. If `jq` is not installed, `test.sh` falls back to
-`python3 -m json.tool`, so JSON is always pretty-printed.
+Colours are omitted here because the run was piped; on a terminal the headings, labels,
+and JSON are colourised. JSON is rendered with `jq` when available, otherwise a bundled
+`python3` colouriser, otherwise raw — so it is always pretty-printed. Set `NO_COLOR=1`
+to disable colour, or `FORCE_COLOR=1` to keep it when piping (e.g. into a pager).
 
 <details open>
 <summary><b>Full run</b></summary>
@@ -732,7 +733,8 @@ Verified on: torch `2.10.0+rocm7.13.0a20260513`, device `"Radeon 8060S Graphics"
 |---|---|
 | `connection refused` from `test.sh` | server not up yet — wait for `model ready`, or check `/health` |
 | `make test` fails but `./test.sh` works | `make test` targets `127.0.0.1`; use `./test.sh` with `BASE_URL` for remote hosts |
-| request/response not pretty-printed | no `jq` and no `python3` on the client; install `jq` (fallbacks are progressively rawer) |
+| request/response not pretty-printed | no `jq` and no `python3` on the client; install either |
+| no colour in JSON | output is piped (`jq` colours a TTY only) — run directly, or set `FORCE_COLOR=1` |
 | first request very slow | weights are still loading; wait for `serving http://...` |
 | `hipErrorNoBinaryForGpu` / segfault at startup | wrong torch wheel — use `run.sh` on a ROCm host so the gfx1151 index is used |
 | `schema requires N tokens ... maximum is 16384` | the questions/schema alone exceed the context; shorten descriptions or ask fewer questions |
