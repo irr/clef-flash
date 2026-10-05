@@ -308,10 +308,11 @@ make test                                   # local, http://127.0.0.1:8000
 BASE_URL=http://192.168.1.198:8000 ./test.sh  # or any remote server
 ```
 
-`test.sh` posts one request per type with the same `STATE`, pretty-prints each
-request/response with `jq` (falling back to raw text if `jq` is absent), and prints
-`total` and `ttfb` timings. The `Makefile` target only points at `127.0.0.1`; for a
-remote host, call `test.sh` directly and pass `BASE_URL`, as above.
+`test.sh` posts one request per type with the same `STATE`, prints each request and
+response pretty-printed, and finishes with a summary table. JSON is formatted with `jq`
+when available, otherwise `python3 -m json.tool`, otherwise raw. The `Makefile` target
+only points at `127.0.0.1`; for a remote host, call `test.sh` directly and pass
+`BASE_URL`, as above.
 
 Note: `ttfb` (time to first byte) is within a fraction of a millisecond of `total` in
 every response — there is no streaming and no decode phase, so the first byte *is* the
@@ -407,9 +408,9 @@ differ slightly: they track the number of options and the length of their descri
 
 | Type | Prompt | Answer | Latency |
 |---|---|---|---|
-| `noul` — "Is a service down?" | 163 tok | `0.9425` | 0.270 s |
+| `noul` — "Is a service down?" | 163 tok | `0.9425` | 0.273 s |
 | `choice` — "Which team should handle the message?" | 180 tok | `technical` @ 0.9804 | 0.263 s |
-| `score` — "How soon does this need a response?" | 167 tok | `1.9583` ≈ Today @ 0.9752 | 0.270 s |
+| `score` — "How soon does this need a response?" | 167 tok | `1.9583` ≈ Today @ 0.9752 | 0.274 s |
 
 Latency varies by a few tens of milliseconds between runs; the numbers below are from
 the same run as the verbatim output at the end of this section.
@@ -530,123 +531,142 @@ score near `1.0` with low confidence, which is very different from a confident `
 
 ### Full `test.sh` output
 
-Verbatim output of `BASE_URL=http://192.168.1.198:8000 ./test.sh`, in order. Each
-block is the echoed request, the response, and one `[latency]` line where `total` and
-`ttfb` are within a fraction of a millisecond of each other — the whole answer arrives
-in the first byte because there is no decode phase.
+Verbatim output of `BASE_URL=http://192.168.1.198:8000 ./test.sh`. Each case shows the
+request, the response, and a `latency` line; the run ends with a summary table. `total`
+and `ttfb` are within a fraction of a millisecond of each other, because the whole
+answer arrives in the first byte — there is no decode phase.
+
+Colours are omitted here because the run was piped; on a terminal the headings and
+labels are colourised. If `jq` is not installed, `test.sh` falls back to
+`python3 -m json.tool`, so JSON is always pretty-printed.
 
 <details open>
-<summary><b>All three cases</b></summary>
+<summary><b>Full run</b></summary>
 
 ```text
-===== noul =====
---- request ---
-{
-  "model": "clef-flash",
-  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
-  "questions": {
-    "outage": {
-      "type": "noul",
-      "instructions": "Is a service down?"
-    }
-  }
-}
---- response ---
-{
-  "model": "clef-flash",
-  "answers": {
-    "outage": {
-      "type": "noul",
-      "noul": 0.9425
-    }
-  },
-  "usage": {
-    "input_tokens": 163,
-    "output_tokens": 0
-  }
-}
-[latency] total=0.270046s ttfb=0.269843s
-===== choice =====
---- request ---
-{
-  "model": "clef-flash",
-  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
-  "questions": {
-    "department": {
-      "type": "choice",
-      "instructions": "Which team should handle the message?",
-      "criteria": {
-        "billing": "Payments, invoices, or refunds",
-        "technical": "Bugs, outages, or blocked orders",
-        "sales": "New purchases or upgrades"
+clef-flash test  http://192.168.1.198:8000
+state: Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.
+
+▎ noul — Is a service down?
+──────────────────────────────────────────────────────────────────────
+· request
+    {
+      "model": "clef-flash",
+      "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+      "questions": {
+        "outage": {
+          "type": "noul",
+          "instructions": "Is a service down?"
+        }
       }
     }
-  }
-}
---- response ---
-{
-  "model": "clef-flash",
-  "answers": {
-    "department": {
-      "type": "choice",
-      "choice": "technical",
-      "confidence": 0.9804,
-      "probabilities": {
-        "billing": 0.0134,
-        "technical": 0.9804,
-        "sales": 0.0062
-      }
-    }
-  },
-  "usage": {
-    "input_tokens": 180,
-    "output_tokens": 0
-  }
-}
-[latency] total=0.262985s ttfb=0.262697s
-===== score =====
---- request ---
-{
-  "model": "clef-flash",
-  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
-  "questions": {
-    "urgency": {
-      "type": "score",
-      "instructions": "How soon does this need a response?",
-      "criteria": [
-        "Can wait",
-        "This week",
-        "Today"
-      ]
-    }
-  }
-}
---- response ---
-{
-  "model": "clef-flash",
-  "answers": {
-    "urgency": {
-      "type": "score",
-      "score": 1.9583,
-      "confidence": 0.9752,
-      "legend": {
-        "0": "Can wait",
-        "1": "This week",
-        "2": "Today"
+· response
+    {
+      "model": "clef-flash",
+      "answers": {
+        "outage": {
+          "type": "noul",
+          "noul": 0.9425
+        }
       },
-      "probabilities": {
-        "0": 0.017,
-        "1": 0.0078,
-        "2": 0.9752
+      "usage": {
+        "input_tokens": 163,
+        "output_tokens": 0
       }
     }
-  },
-  "usage": {
-    "input_tokens": 167,
-    "output_tokens": 0
-  }
-}
-[latency] total=0.269899s ttfb=0.269709s
+    latency  total 0.273s  ttfb 0.273s  http 200
+
+▎ choice — Which team should handle the message?
+──────────────────────────────────────────────────────────────────────
+· request
+    {
+      "model": "clef-flash",
+      "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+      "questions": {
+        "department": {
+          "type": "choice",
+          "instructions": "Which team should handle the message?",
+          "criteria": {
+            "billing": "Payments, invoices, or refunds",
+            "technical": "Bugs, outages, or blocked orders",
+            "sales": "New purchases or upgrades"
+          }
+        }
+      }
+    }
+· response
+    {
+      "model": "clef-flash",
+      "answers": {
+        "department": {
+          "type": "choice",
+          "choice": "technical",
+          "confidence": 0.9804,
+          "probabilities": {
+            "billing": 0.0134,
+            "technical": 0.9804,
+            "sales": 0.0062
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 180,
+        "output_tokens": 0
+      }
+    }
+    latency  total 0.263s  ttfb 0.263s  http 200
+
+▎ score — How soon does this need a response?
+──────────────────────────────────────────────────────────────────────
+· request
+    {
+      "model": "clef-flash",
+      "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+      "questions": {
+        "urgency": {
+          "type": "score",
+          "instructions": "How soon does this need a response?",
+          "criteria": [
+            "Can wait",
+            "This week",
+            "Today"
+          ]
+        }
+      }
+    }
+· response
+    {
+      "model": "clef-flash",
+      "answers": {
+        "urgency": {
+          "type": "score",
+          "score": 1.9583,
+          "confidence": 0.9752,
+          "legend": {
+            "0": "Can wait",
+            "1": "This week",
+            "2": "Today"
+          },
+          "probabilities": {
+            "0": 0.017,
+            "1": 0.0078,
+            "2": 0.9752
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 167,
+        "output_tokens": 0
+      }
+    }
+    latency  total 0.274s  ttfb 0.273s  http 200
+
+▎ summary
+──────────────────────────────────────────────────────────────────────
+  TYPE     PROMPT     ANSWER                     LATENCY
+  noul     163 tok    0.9425                     0.273s
+  choice   180 tok    technical (0.9804)         0.263s
+  score    167 tok    1.9583 (0.9752)            0.274s
 ```
 
 </details>
@@ -712,7 +732,7 @@ Verified on: torch `2.10.0+rocm7.13.0a20260513`, device `"Radeon 8060S Graphics"
 |---|---|
 | `connection refused` from `test.sh` | server not up yet — wait for `model ready`, or check `/health` |
 | `make test` fails but `./test.sh` works | `make test` targets `127.0.0.1`; use `./test.sh` with `BASE_URL` for remote hosts |
-| request/response not pretty-printed | `jq` not installed (falls back to raw output) |
+| request/response not pretty-printed | no `jq` and no `python3` on the client; install `jq` (fallbacks are progressively rawer) |
 | first request very slow | weights are still loading; wait for `serving http://...` |
 | `hipErrorNoBinaryForGpu` / segfault at startup | wrong torch wheel — use `run.sh` on a ROCm host so the gfx1151 index is used |
 | `schema requires N tokens ... maximum is 16384` | the questions/schema alone exceed the context; shorten descriptions or ask fewer questions |
@@ -725,7 +745,7 @@ Verified on: torch `2.10.0+rocm7.13.0a20260513`, device `"Radeon 8060S Graphics"
 |---|---|
 | `run.sh` | Environment setup, weights download, server start |
 | `serve_clef_flash.py` | HTTP server wrapping the model's `systemone()` entry point |
-| `test.sh` | One request per question type against a running server |
+| `test.sh` | One request per question type against a running server; pretty-prints all JSON |
 | `Makefile` | Convenience targets |
 | `models/clef-flash/` | Downloaded snapshot (backbone, joint head, processor) — created on first run |
 | `.venv/` | uv virtualenv — created on first run |

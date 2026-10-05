@@ -4,38 +4,131 @@
 #
 #   ./test.sh
 #   BASE_URL=http://127.0.0.1:8000 ./test.sh
+#   STATE="Database replica lag is growing." BASE_URL=... ./test.sh
+#
+# Pretty-prints every request and response. Uses jq when available, falls back to
+# python3 -m json.tool, and finally to the raw text. Colours are emitted only when
+# stdout is a terminal, so redirected output stays clean.
 
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 STATE="${STATE:-Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.}"
+TIMEOUT="${TIMEOUT:-120}"
+WIDTH="${WIDTH:-70}"
 
-# Pretty-print JSON with jq; fall back to the raw text if it is not valid JSON.
+# ---------------------------------------------------------------- colours ----
+if [[ -t 1 ]]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+  BLUE=$'\033[34m'; GREEN=$'\033[32m'
+  YELLOW=$'\033[33m'; RED=$'\033[31m'
+else
+  BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""; RED=""
+fi
+
+rule() { printf '%s\n' "${DIM}$(printf '─%.0s' $(seq 1 "$WIDTH"))${RESET}"; }
+title() {
+  printf '\n%s\n' "${BOLD}${BLUE}▎ ${1}${RESET}"
+  rule
+}
+label() { printf '%s\n' "${YELLOW}${BOLD}· ${1}${RESET}"; }
+indent() { sed 's/^/    /'; }
+
+# ------------------------------------------------------------ json pretty ----
+# Prints JSON indented, or the input unchanged when nothing can parse it.
 pretty() {
-  echo "$1" | jq . 2>/dev/null || echo "$1"
+  local input="$1"
+  if command -v jq >/dev/null 2>&1 && printf '%s\n' "$input" | jq . 2>/dev/null; then
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1 && printf '%s\n' "$input" | python3 -m json.tool 2>/dev/null; then
+    return 0
+  fi
+  printf '%s\n' "$input"
 }
 
+# --------------------------------------------------------- summary fields ----
+# Prints "<tokens>\t<answer>" for the first answer in a response, or "?\t?".
+describe() {
+  local response="$1"
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$response" | jq -r '
+      (.answers | to_entries[0].value) as $a
+      | (.usage.input_tokens // "?")                       as $t
+      | (if $a.type == "noul"   then ($a.noul    | tostring)
+         elif $a.type == "choice" then "\($a.choice) (\($a.confidence))"
+         else "\($a.score) (\($a.confidence))"
+         end)                                               as $ans
+      | "\($t)\t\($ans)"' 2>/dev/null && return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$response" | python3 -c '
+import json, sys
+
+try:
+    d = json.load(sys.stdin)
+    a = next(iter(d["answers"].values()))
+    t = d.get("usage", {}).get("input_tokens", "?")
+    if a["type"] == "noul":
+        ans = str(a["noul"])
+    elif a["type"] == "choice":
+        ans = "%s (%s)" % (a["choice"], a["confidence"])
+    else:
+        ans = "%s (%s)" % (a["score"], a["confidence"])
+    print("%s\t%s" % (t, ans))
+except Exception:
+    print("?\t?")
+' 2>/dev/null && return 0
+  fi
+  printf '?\t?\n'
+}
+
+# ------------------------------------------------------------- one request ----
+ROWS=()
 post() {
-  local name="$1"
-  local body="$2"
-  echo "===== ${name} ====="
-  echo "--- request ---"
-  pretty "$body"
-  echo "--- response ---"
-  local out
+  local name="$1" question="$2" body="$3"
+  title "${name} — ${question}"
+
+  label "request"
+  pretty "$body" | indent
+
+  local out timing rc=0
   out="$(mktemp)"
-  local timing
-  timing="$(curl -sS -m 120 "${BASE_URL}/v1/decisions" \
-    -H 'Content-Type: application/json' \
-    -d "$body" \
-    -o "$out" \
-    -w '[latency] total=%{time_total}s ttfb=%{time_starttransfer}s')"
-  pretty "$(cat "$out")"
+  timing="$(curl -sS -m "${TIMEOUT}" "${BASE_URL}/v1/decisions" \
+      -H 'Content-Type: application/json' \
+      -d "$body" \
+      -o "$out" \
+      -w '%{time_total} %{time_starttransfer} %{http_code}')" || rc=$?
+
+  if (( rc != 0 )); then
+    printf '%s\n' "${RED}request failed (curl exit ${rc})${RESET}" | indent
+    rm -f "$out"
+    ROWS+=("${name}|-|-|-")
+    return 1
+  fi
+
+  local response
+  response="$(cat "$out")"
   rm -f "$out"
-  echo "$timing"
+
+  label "response"
+  pretty "$response" | indent
+
+  local total ttfb code
+  read -r total ttfb code <<<"$timing"
+  printf '%s\n' "${GREEN}latency${RESET}  total $(printf '%.3f' "$total")s  ttfb $(printf '%.3f' "$ttfb")s  http ${code}" | indent
+
+  local fields tokens answer
+  fields="$(describe "$response")"
+  IFS=$'\t' read -r tokens answer <<<"$fields"
+  ROWS+=("${name}|${tokens}|${answer}|$(printf '%.3f' "$total")s")
 }
 
-post noul "$(cat <<EOF
+# ------------------------------------------------------------------ header ----
+printf '%s\n' "${BOLD}clef-flash test${RESET}  ${DIM}${BASE_URL}${RESET}"
+printf '%s\n' "${DIM}state: ${STATE}${RESET}"
+
+post noul "Is a service down?" "$(cat <<EOF
 {
   "model": "clef-flash",
   "state": "${STATE}",
@@ -49,7 +142,7 @@ post noul "$(cat <<EOF
 EOF
 )"
 
-post choice "$(cat <<EOF
+post choice "Which team should handle the message?" "$(cat <<EOF
 {
   "model": "clef-flash",
   "state": "${STATE}",
@@ -68,7 +161,7 @@ post choice "$(cat <<EOF
 EOF
 )"
 
-post score "$(cat <<EOF
+post score "How soon does this need a response?" "$(cat <<EOF
 {
   "model": "clef-flash",
   "state": "${STATE}",
@@ -82,3 +175,12 @@ post score "$(cat <<EOF
 }
 EOF
 )"
+
+# ----------------------------------------------------------------- summary ----
+title "summary"
+printf '  %-8s %-10s %-26s %s\n' "TYPE" "PROMPT" "ANSWER" "LATENCY"
+for row in "${ROWS[@]}"; do
+  IFS='|' read -r name tokens answer latency <<<"$row"
+  printf '  %-8s %-10s %-26s %s\n' "$name" "${tokens} tok" "$answer" "$latency"
+done
+echo
