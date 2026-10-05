@@ -10,14 +10,29 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 STATE="${STATE:-Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.}"
 
+# Pretty-print JSON with jq; fall back to the raw text if it is not valid JSON.
+pretty() {
+  echo "$1" | jq . 2>/dev/null || echo "$1"
+}
+
 post() {
   local name="$1"
   local body="$2"
   echo "===== ${name} ====="
-  curl -sS -m 120 "${BASE_URL}/v1/systemone" \
+  echo "--- request ---"
+  pretty "$body"
+  echo "--- response ---"
+  local out
+  out="$(mktemp)"
+  local timing
+  timing="$(curl -sS -m 120 "${BASE_URL}/v1/decisions" \
     -H 'Content-Type: application/json' \
     -d "$body" \
-    -w '\n[latency] total=%{time_total}s ttfb=%{time_starttransfer}s\n'
+    -o "$out" \
+    -w '[latency] total=%{time_total}s ttfb=%{time_starttransfer}s')"
+  pretty "$(cat "$out")"
+  rm -f "$out"
+  echo "$timing"
 }
 
 post noul "$(cat <<EOF
