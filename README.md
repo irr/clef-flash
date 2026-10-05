@@ -407,9 +407,12 @@ differ slightly: they track the number of options and the length of their descri
 
 | Type | Prompt | Answer | Latency |
 |---|---|---|---|
-| `noul` — "Is a service down?" | 163 tok | `0.9425` | 0.274 s |
-| `choice` — "Which team should handle the message?" | 180 tok | `technical` @ 0.9804 | 0.264 s |
-| `score` — "How soon does this need a response?" | 167 tok | `1.9583` ≈ Today @ 0.9752 | 0.273 s |
+| `noul` — "Is a service down?" | 163 tok | `0.9425` | 0.270 s |
+| `choice` — "Which team should handle the message?" | 180 tok | `technical` @ 0.9804 | 0.263 s |
+| `score` — "How soon does this need a response?" | 167 tok | `1.9583` ≈ Today @ 0.9752 | 0.270 s |
+
+Latency varies by a few tens of milliseconds between runs; the numbers below are from
+the same run as the verbatim output at the end of this section.
 
 <details>
 <summary><b><code>noul</code></b> — 163 tokens, <code>0.9425</code></summary>
@@ -521,6 +524,129 @@ score near `1.0` with low confidence, which is very different from a confident `
   },
   "usage": { "input_tokens": 167, "output_tokens": 0 }
 }
+```
+
+</details>
+
+### Full `test.sh` output
+
+Verbatim output of `BASE_URL=http://192.168.1.198:8000 ./test.sh`, in order. Each
+block is the echoed request, the response, and one `[latency]` line where `total` and
+`ttfb` are within a fraction of a millisecond of each other — the whole answer arrives
+in the first byte because there is no decode phase.
+
+<details open>
+<summary><b>All three cases</b></summary>
+
+```text
+===== noul =====
+--- request ---
+{
+  "model": "clef-flash",
+  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+  "questions": {
+    "outage": {
+      "type": "noul",
+      "instructions": "Is a service down?"
+    }
+  }
+}
+--- response ---
+{
+  "model": "clef-flash",
+  "answers": {
+    "outage": {
+      "type": "noul",
+      "noul": 0.9425
+    }
+  },
+  "usage": {
+    "input_tokens": 163,
+    "output_tokens": 0
+  }
+}
+[latency] total=0.270046s ttfb=0.269843s
+===== choice =====
+--- request ---
+{
+  "model": "clef-flash",
+  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle the message?",
+      "criteria": {
+        "billing": "Payments, invoices, or refunds",
+        "technical": "Bugs, outages, or blocked orders",
+        "sales": "New purchases or upgrades"
+      }
+    }
+  }
+}
+--- response ---
+{
+  "model": "clef-flash",
+  "answers": {
+    "department": {
+      "type": "choice",
+      "choice": "technical",
+      "confidence": 0.9804,
+      "probabilities": {
+        "billing": 0.0134,
+        "technical": 0.9804,
+        "sales": 0.0062
+      }
+    }
+  },
+  "usage": {
+    "input_tokens": 180,
+    "output_tokens": 0
+  }
+}
+[latency] total=0.262985s ttfb=0.262697s
+===== score =====
+--- request ---
+{
+  "model": "clef-flash",
+  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+  "questions": {
+    "urgency": {
+      "type": "score",
+      "instructions": "How soon does this need a response?",
+      "criteria": [
+        "Can wait",
+        "This week",
+        "Today"
+      ]
+    }
+  }
+}
+--- response ---
+{
+  "model": "clef-flash",
+  "answers": {
+    "urgency": {
+      "type": "score",
+      "score": 1.9583,
+      "confidence": 0.9752,
+      "legend": {
+        "0": "Can wait",
+        "1": "This week",
+        "2": "Today"
+      },
+      "probabilities": {
+        "0": 0.017,
+        "1": 0.0078,
+        "2": 0.9752
+      }
+    }
+  },
+  "usage": {
+    "input_tokens": 167,
+    "output_tokens": 0
+  }
+}
+[latency] total=0.269899s ttfb=0.269709s
 ```
 
 </details>
