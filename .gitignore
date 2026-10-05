@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtualenv
+.venv/
+
+# Model weights and HF download cache (~19 GB; re-download with ./run.sh)
+models/
