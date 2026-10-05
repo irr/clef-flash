@@ -45,6 +45,112 @@ independently in the same forward pass:
 }
 ```
 
+## How it works
+
+Despite the OpenAI-style envelope, nothing is generated. There is no autoregressive
+decoding and no parsing of model text: the model emits one **logit vector per allowed
+option**, and the server formats those numbers into JSON. End-to-end latency is one
+prefill — that is where the speed comes from.
+
+```text
+request (state + questions)
+   │
+   ▼
+encode_record()      state + schema → one token sequence,
+   │                 recording the token span of every question and option
+   ▼
+Qwen backbone        ONE forward pass → hidden states (no sampling)
+   │
+   ▼
+JointSchemaHead      span pooling + evidence routing → one logit per option
+   │
+   ▼
+softmax(-1)          one probability distribution per question
+   │
+   ▼
+systemone_answer()   argmax / expectation / pass-through → answer fields
+   │
+   ▼
+response             {"model", "answers", "usage"}
+```
+
+### 1. The prompt is a schema, not a conversation
+
+`encode_record()` renders the request into a single token sequence:
+
+1. A system message: “Read the complete state and schema. Decide every field jointly.
+   Each answer must be exactly one of that field's allowed options.”
+2. `STATE:` followed by the state rendered as compact, key-sorted JSON (media become
+   `<|vision_start|><|image_pad|><|vision_end|>` / video placeholders).
+3. `SCHEMA FIELDS:`, then one block per question:
+
+   ```text
+   FIELD 1
+   ID: department
+   TYPE: choice
+   INSTRUCTION: Which team should handle the message?
+   ALLOWED OPTIONS:
+   OPTION 1: {"option_id":"billing","description":"Payments, invoices, or refunds"}
+   OPTION 2: {"option_id":"technical","description":"Bugs, outages, or blocked orders"}
+   END FIELD
+   ```
+
+4. An assistant prefill: `<|im_start|>assistant\n<think>\n\n</think>\n\nJOINT SCHEMA DECISIONS:`
+   — a turn the backbone attends to, not a place to write.
+
+While building it, `encode_record()` records the token span of each question's
+instructions and of each option's rendered text. Those spans are what the head reads
+later. The state is truncated to fit `max_length` (16384); if the schema alone does not
+fit, the request is rejected.
+
+### 2. One forward pass over the backbone
+
+`ClefModel.forward()` runs the Qwen multimodal backbone once and keeps only the hidden
+states. The KV cache, temperature, stop tokens, and decoding loops never enter the
+picture.
+
+### 3. The joint schema head turns spans into per-option logits
+
+`JointSchemaHead.forward()`:
+
+- pools hidden states over each **question span** → question vector, over each **option
+  span** → option context vector, and over the final token → a global vector;
+- adds a lexical embedding of the option's own text, so the option's wording matters
+  independently of context;
+- routes option queries through attention layers over the *whole* sequence (the
+  "memory"), letting an option collect evidence from anywhere in the state — this is
+  the **joint** part: every field is decided together in one pass, sharing evidence;
+- scores each option against its field vector with a cosine term plus a small residual
+  MLP, added to a lexical prior;
+- emits one logit per option.
+
+### 4. Logits to probabilities to answers
+
+`systemone()` applies `softmax(-1)` per question and hands the distribution to
+`systemone_answer()`, which derives each type's fields:
+
+| Type | Model emits | Derivation |
+|---|---|---|
+| `noul` | logits for `true` / `false` (criteria injected automatically) | passes through `p(true)`; `false` is dropped |
+| `choice` | one logit per criterion key | `choice` = argmax, `confidence` = max prob, full `probabilities` |
+| `score` | one logit per index `0..N-1` | `score` = expected value `sum(i·pᵢ)`, `confidence` = max prob, `legend` built from `criteria` |
+
+### 5. What the model computes vs. what the server computes
+
+Only the probability distributions come from the model's forward pass. Everything else
+is Python post-processing in the model release's `joint_schema_model.py`:
+
+- `choice` is a `max()` over the probabilities; `score` is an expected value (a
+  fractional number the model never "chose");
+- `confidence` is the maximum probability; `legend`, `type`, and `model` are echoed
+  from the request;
+- `usage.input_tokens` is the length of the encoded sequence, while
+  `usage.output_tokens` is a hardcoded `0` — a constant, not a measurement, because no
+  tokens are ever produced.
+
+Every question in a request — any mix of types — is answered in the same single forward
+pass.
+
 ## Quick start
 
 ```sh
