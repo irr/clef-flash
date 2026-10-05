@@ -6,7 +6,7 @@ decision model that turns a state and a schema of typed questions (`noul`, `choi
 `score`) into decisions — one forward pass, no text generation, no output parsing.
 
 `run.sh` sets up a `uv` virtualenv, downloads the ~19 GB weights, and serves the
-Jev-compatible `POST /v1/systemone` API.
+Jev-compatible `POST /v1/decisions` API.
 
 ## Quick start
 
@@ -39,10 +39,10 @@ Python 3.12.
 ## API
 
 - `GET /health`, `GET /v1/models` — server status
-- `POST /v1/systemone` (also `/v1/decisions`) — Jev-compatible decision endpoint
+- `POST /v1/decisions` (also `/v1/systemone`) — Jev-compatible decision endpoint
 
 ```sh
-curl -s http://127.0.0.1:8000/v1/systemone \
+curl -s http://127.0.0.1:8000/v1/decisions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "clef-flash",
