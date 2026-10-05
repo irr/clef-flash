@@ -531,146 +531,157 @@ score near `1.0` with low confidence, which is very different from a confident `
 
 ### Full `test.sh` output
 
-Verbatim output of `BASE_URL=http://192.168.1.198:8000 ./test.sh`. Each case shows the
-request, the response, and a `latency` line; the run ends with a summary table. `total`
-and `ttfb` are within a fraction of a millisecond of each other, because the whole
-answer arrives in the first byte — there is no decode phase.
+Content of `BASE_URL=http://192.168.1.198:8000 ./test.sh`. For each case `test.sh`
+prints a banner, the echoed request, the response, and a latency line, then a summary.
+On a terminal the JSON is colourised; it is shown here in `json` blocks so it
+highlights in your renderer as well.
 
-Colours are omitted here because the run was piped; on a terminal the headings, labels,
-and JSON are colourised. JSON is rendered with `jq` when available, otherwise a bundled
-`python3` colouriser, otherwise raw — so it is always pretty-printed. Set `NO_COLOR=1`
-to disable colour, or `FORCE_COLOR=1` to keep it when piping (e.g. into a pager).
+#### `noul` — Is a service down?
 
-<details open>
-<summary><b>Full run</b></summary>
+Request:
 
-```text
-clef-flash test  http://192.168.1.198:8000
-state: Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.
-
-▎ noul — Is a service down?
-──────────────────────────────────────────────────────────────────────
-· request
-    {
-      "model": "clef-flash",
-      "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
-      "questions": {
-        "outage": {
-          "type": "noul",
-          "instructions": "Is a service down?"
-        }
-      }
+```json
+{
+  "model": "clef-flash",
+  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+  "questions": {
+    "outage": {
+      "type": "noul",
+      "instructions": "Is a service down?"
     }
-· response
-    {
-      "model": "clef-flash",
-      "answers": {
-        "outage": {
-          "type": "noul",
-          "noul": 0.9425
-        }
-      },
-      "usage": {
-        "input_tokens": 163,
-        "output_tokens": 0
-      }
-    }
-    latency  total 0.273s  ttfb 0.273s  http 200
-
-▎ choice — Which team should handle the message?
-──────────────────────────────────────────────────────────────────────
-· request
-    {
-      "model": "clef-flash",
-      "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
-      "questions": {
-        "department": {
-          "type": "choice",
-          "instructions": "Which team should handle the message?",
-          "criteria": {
-            "billing": "Payments, invoices, or refunds",
-            "technical": "Bugs, outages, or blocked orders",
-            "sales": "New purchases or upgrades"
-          }
-        }
-      }
-    }
-· response
-    {
-      "model": "clef-flash",
-      "answers": {
-        "department": {
-          "type": "choice",
-          "choice": "technical",
-          "confidence": 0.9804,
-          "probabilities": {
-            "billing": 0.0134,
-            "technical": 0.9804,
-            "sales": 0.0062
-          }
-        }
-      },
-      "usage": {
-        "input_tokens": 180,
-        "output_tokens": 0
-      }
-    }
-    latency  total 0.263s  ttfb 0.263s  http 200
-
-▎ score — How soon does this need a response?
-──────────────────────────────────────────────────────────────────────
-· request
-    {
-      "model": "clef-flash",
-      "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
-      "questions": {
-        "urgency": {
-          "type": "score",
-          "instructions": "How soon does this need a response?",
-          "criteria": [
-            "Can wait",
-            "This week",
-            "Today"
-          ]
-        }
-      }
-    }
-· response
-    {
-      "model": "clef-flash",
-      "answers": {
-        "urgency": {
-          "type": "score",
-          "score": 1.9583,
-          "confidence": 0.9752,
-          "legend": {
-            "0": "Can wait",
-            "1": "This week",
-            "2": "Today"
-          },
-          "probabilities": {
-            "0": 0.017,
-            "1": 0.0078,
-            "2": 0.9752
-          }
-        }
-      },
-      "usage": {
-        "input_tokens": 167,
-        "output_tokens": 0
-      }
-    }
-    latency  total 0.274s  ttfb 0.273s  http 200
-
-▎ summary
-──────────────────────────────────────────────────────────────────────
-  TYPE     PROMPT     ANSWER                     LATENCY
-  noul     163 tok    0.9425                     0.273s
-  choice   180 tok    technical (0.9804)         0.263s
-  score    167 tok    1.9583 (0.9752)            0.274s
+  }
+}
 ```
 
-</details>
+Response:
+
+```json
+{
+  "model": "clef-flash",
+  "answers": {
+    "outage": {
+      "type": "noul",
+      "noul": 0.9425
+    }
+  },
+  "usage": {
+    "input_tokens": 163,
+    "output_tokens": 0
+  }
+}
+```
+
+`latency  total 0.273s  ttfb 0.273s  http 200`
+
+#### `choice` — Which team should handle the message?
+
+Request:
+
+```json
+{
+  "model": "clef-flash",
+  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle the message?",
+      "criteria": {
+        "billing": "Payments, invoices, or refunds",
+        "technical": "Bugs, outages, or blocked orders",
+        "sales": "New purchases or upgrades"
+      }
+    }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "model": "clef-flash",
+  "answers": {
+    "department": {
+      "type": "choice",
+      "choice": "technical",
+      "confidence": 0.9804,
+      "probabilities": {
+        "billing": 0.0134,
+        "technical": 0.9804,
+        "sales": 0.0062
+      }
+    }
+  },
+  "usage": {
+    "input_tokens": 180,
+    "output_tokens": 0
+  }
+}
+```
+
+`latency  total 0.263s  ttfb 0.263s  http 200`
+
+#### `score` — How soon does this need a response?
+
+Request:
+
+```json
+{
+  "model": "clef-flash",
+  "state": "Checkout has been failing for every customer for the last hour. Orders are blocked and support is getting refund demands.",
+  "questions": {
+    "urgency": {
+      "type": "score",
+      "instructions": "How soon does this need a response?",
+      "criteria": [
+        "Can wait",
+        "This week",
+        "Today"
+      ]
+    }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "model": "clef-flash",
+  "answers": {
+    "urgency": {
+      "type": "score",
+      "score": 1.9583,
+      "confidence": 0.9752,
+      "legend": {
+        "0": "Can wait",
+        "1": "This week",
+        "2": "Today"
+      },
+      "probabilities": {
+        "0": 0.017,
+        "1": 0.0078,
+        "2": 0.9752
+      }
+    }
+  },
+  "usage": {
+    "input_tokens": 167,
+    "output_tokens": 0
+  }
+}
+```
+
+`latency  total 0.274s  ttfb 0.274s  http 200`
+
+#### Summary
+
+```text
+TYPE     PROMPT     ANSWER                     LATENCY
+noul     163 tok    0.9425                     0.273s
+choice   180 tok    technical (0.9804)         0.263s
+score    167 tok    1.9583 (0.9752)            0.274s
+```
 
 ## Configuration
 
