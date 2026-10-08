@@ -725,6 +725,7 @@ make run PORT=9000                          # different port
 CLEF_DEVICE=cpu make run                    # force CPU
 make smoke                                  # load + one request, no HTTP
 make debug                                  # show the rendered prompt and latency
+CLEF_CAUSAL_CONV1D=0 ./run.sh                 # skip the one-time causal-conv1d build
 BASE_URL=http://192.168.1.198:8000 ./test.sh  # test a remote server
 STATE="Database replica lag is growing." BASE_URL=... ./test.sh
 ```

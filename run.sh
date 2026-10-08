@@ -12,6 +12,7 @@
 #   CLEF_DEVICE=cpu ./run.sh
 #   ./run.sh --smoke
 #   ./run.sh --debug   # log request, rendered prompt, response and latency
+#   CLEF_CAUSAL_CONV1D=0 ./run.sh   # skip building causal-conv1d (default: build once)
 #
 #   curl -s http://0.0.0.0:8000/v1/systemone \
 #     -H 'Content-Type: application/json' \
@@ -29,13 +30,14 @@ PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://rocm.nightlies.amd.com/v2/gfx1151/}"
 SMOKE=0
 DEBUG="${DEBUG:-0}"
+CLEF_CAUSAL_CONV1D="${CLEF_CAUSAL_CONV1D:-1}"
 
 for arg in "$@"; do
   case "$arg" in
     --smoke) SMOKE=1 ;;
     --debug) DEBUG=1 ;;
     -h|--help)
-      sed -n '2,19p' "$0"
+      sed -n "2,20p" "$0"
       exit 0
       ;;
     *)
@@ -67,6 +69,9 @@ if [[ "$USE_ROCM" == 1 ]]; then
   export HSA_USE_SVM="${HSA_USE_SVM:-0}"
   export HSA_ENABLE_SDMA="${HSA_ENABLE_SDMA:-0}"
   export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
+  # Without this, SDPA flash/mem-efficient kernels are disabled on gfx1151 (warns
+  # "still experimental") and attention uses the slower math path.
+  export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL="${TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL:-1}"
   echo "ROCm: native gfx1151, HSA_OVERRIDE_GFX_VERSION unset, HSA_USE_SVM=${HSA_USE_SVM}, HSA_ENABLE_SDMA=${HSA_ENABLE_SDMA}"
 fi
 
@@ -87,7 +92,19 @@ uv pip install --python "$ROOT/.venv/bin/python" \
   "huggingface_hub>=0.34" \
   "safetensors>=0.4" \
   "pillow>=10" \
-  "accelerate>=1.0"
+  "accelerate>=1.0" \
+  "flash-linear-attention"
+
+# Optional HIP kernel for the GatedDeltaNet conv. Builds from source (~2 min, once;
+# verified on gfx1151 with hipcc). If it fails the torch fallback is used, only slower.
+if [[ "$CLEF_CAUSAL_CONV1D" == 1 ]] \
+   && ! "$ROOT/.venv/bin/python" -c 'import causal_conv1d' >/dev/null 2>&1; then
+  uv pip install --python "$ROOT/.venv/bin/python" setuptools wheel ninja packaging
+  CAUSAL_CONV1D_FORCE_BUILD=TRUE PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx1151}" \
+  ROCM_PATH="${ROCM_PATH:-/opt/rocm}" MAX_JOBS="${MAX_JOBS:-8}" \
+    uv pip install --python "$ROOT/.venv/bin/python" --no-build-isolation causal-conv1d \
+    || echo "causal-conv1d unavailable, using torch fallback" >&2
+fi
 
 mkdir -p "$MODEL_DIR"
 if [[ ! -f "$MODEL_DIR/joint_schema_model.py" ]]; then
