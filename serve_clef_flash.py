@@ -23,6 +23,7 @@ HOST = os.environ.get("CLEF_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CLEF_PORT", "8091"))
 SMOKE = os.environ.get("CLEF_SMOKE", "0") == "1"
 DEBUG = os.environ.get("CLEF_DEBUG", "0") == "1"
+MAX_LOG_BODY = 500
 
 
 def pick_device(requested: str) -> str:
@@ -87,6 +88,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         print(f"{self.address_string()} {fmt % args}", flush=True)
 
+    def log_request(self, code="-", size="-") -> None:
+        # Logged in _send instead, once the response body is known.
+        pass
+
     def _send(self, status: int, payload: dict) -> None:
         raw = json.dumps(payload).encode()
         self.send_response(status)
@@ -94,8 +99,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+        latency_ms = (time.perf_counter() - self._t0) * 1000
+        text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        if len(text) > MAX_LOG_BODY:
+            text = f"{text[:MAX_LOG_BODY]}…(+{len(text) - MAX_LOG_BODY} chars)"
+        state = ""
+        if self._state is not None:
+            state = json.dumps(str(self._state), ensure_ascii=False)
+            if len(state) > MAX_LOG_BODY:
+                state = f"{state[:MAX_LOG_BODY]}…(+{len(state) - MAX_LOG_BODY} chars)"
+            state = f" state={state}"
+        self.log_message('"%s" %s %.1fms%s %s', self.requestline, status, latency_ms, state, text)
 
     def do_GET(self) -> None:  # noqa: N802
+        self._t0 = time.perf_counter()
+        self._state = None
         if self.path.rstrip("/") in ("/health", "/v1/models"):
             self._send(
                 200,
@@ -112,6 +130,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        self._t0 = time.perf_counter()
+        self._state = None
         path = self.path.split("?", 1)[0].rstrip("/")
         if path not in ("/v1/systemone", "/v1/decisions"):
             self._send(404, {"error": "not found"})
@@ -119,6 +139,8 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
+            if isinstance(body, dict):
+                self._state = body.get("state")
             self._send(200, decide(body))
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
