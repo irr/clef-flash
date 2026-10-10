@@ -229,11 +229,12 @@ ls /dev/kfd 2>/dev/null # present on ROCm hosts
 | arg parsing | `--smoke`, `--debug`, `--help` |
 | uv check | installs uv to `~/.local/bin` if missing |
 | ROCm detect | if `/dev/kfd`, `/opt/rocm`, or `ROCM_PATH` exists → native gfx1151 mode; unsets `HSA_OVERRIDE_GFX_VERSION`, sets `HSA_USE_SVM=0`, `HSA_ENABLE_SDMA=0`, `HIP_VISIBLE_DEVICES=0` |
+| NVIDIA detect | otherwise, if `/dev/nvidia0` or `nvidia-smi -L` shows a GPU → CUDA mode; sets `CUDA_VISIBLE_DEVICES=0`, `CUDA_HOME`, and `TORCH_CUDA_ARCH_LIST` from the detected compute capability. Override with `CLEF_GPU=amd\|nvidia\|none` |
 | venv | creates `./.venv` with Python 3.12 if absent |
-| torch | installs torch — from the TheRock gfx1151 index on ROCm hosts, otherwise the default wheel |
+| torch | installs torch — from the TheRock gfx1151 index on ROCm hosts, from the `cu128` index on NVIDIA hosts (`TORCH_INDEX_URL` overrides), otherwise the default wheel |
 | deps | `transformers>=5.10.2`, `huggingface_hub`, `safetensors`, `pillow`, `accelerate` |
 | weights | if `models/clef-flash/joint_schema_model.py` is missing, `hf download Cloudflare/clef-flash` (~19 GB) |
-| GPU probe | on ROCm, runs a tiny CUDA op before loading 19 GB, so a broken GPU fails fast |
+| GPU probe | on ROCm or NVIDIA, runs a tiny CUDA op before loading 19 GB, so a broken GPU fails fast |
 | env | exports `CLEF_MODEL_DIR`, `CLEF_DEVICE`, `CLEF_HOST`, `CLEF_PORT`, `CLEF_SMOKE`, `CLEF_DEBUG` |
 | exec | `uv run python serve_clef_flash.py` |
 
