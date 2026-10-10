@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,6 +49,12 @@ print(f"loading {MODEL_DIR} on {DEVICE}", flush=True)
 MODEL, PROCESSOR = load_release_model(MODEL_DIR, device=DEVICE)
 MODEL.eval()
 print("model ready", flush=True)
+
+# The model's Triton kernels (fla) share module-level autotuner objects whose
+# run() mutates state without locking: two concurrent requests raced inside
+# Autotuner.run and crashed with "'NoneType' object is not a mapping". A single
+# GPU gains nothing from parallel forwards anyway, so serve them one at a time.
+INFERENCE_LOCK = threading.Lock()
 
 
 def decide(body: dict) -> dict:
@@ -141,37 +148,55 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
             if isinstance(body, dict):
                 self._state = body.get("state")
-            self._send(200, decide(body))
+            with INFERENCE_LOCK:
+                payload = decide(body)
+            self._send(200, payload)
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             self._send(400, {"error": str(exc)})
 
 
-def smoke() -> None:
-    response = decide(
-        {
-            "model": "clef-flash",
-            "state": "Checkout has been failing for every customer for the last hour.",
-            "questions": {
-                "urgent": {"type": "noul", "instructions": "Is this urgent?"},
-                "team": {
-                    "type": "choice",
-                    "instructions": "Which team should handle this?",
-                    "criteria": {
-                        "billing": "Payments or invoices",
-                        "technical": "Outages and errors",
-                    },
-                },
+SMOKE_BODY = {
+    "model": "clef-flash",
+    "state": "Checkout has been failing for every customer for the last hour.",
+    "questions": {
+        "urgent": {"type": "noul", "instructions": "Is this urgent?"},
+        "team": {
+            "type": "choice",
+            "instructions": "Which team should handle this?",
+            "criteria": {
+                "billing": "Payments or invoices",
+                "technical": "Outages and errors",
             },
-        }
+        },
+    },
+}
+
+
+def smoke() -> None:
+    print(json.dumps(decide(SMOKE_BODY), indent=2), flush=True)
+
+
+def warmup() -> None:
+    # Compile and autotune every Triton kernel before the first real request:
+    # fla leaves FLA_CACHE_MODE disabled by default, so first use benchmarks
+    # ~25 configs per kernel (l2norm took ~1.4s alone on the 8060S). The long
+    # state covers the next NB token-length bucket (kernels keyed on D and NB).
+    long_state = " ".join(
+        ["Checkout latency spiked after the last deploy and retries are piling up."] * 900
     )
-    print(json.dumps(response, indent=2), flush=True)
+    bodies = [SMOKE_BODY, {**SMOKE_BODY, "state": long_state}]
+    start = time.perf_counter()
+    for body in bodies:
+        decide(body)
+    print(f"warmed up on {len(bodies)} requests in {time.perf_counter() - start:.1f}s", flush=True)
 
 
 if __name__ == "__main__":
     if SMOKE:
         smoke()
         raise SystemExit(0)
+    warmup()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"serving http://{HOST}:{PORT}/v1/systemone", flush=True)
     server.serve_forever()
